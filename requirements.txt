@@ -1,24 +1,32 @@
-# 遗留版本依赖（针对 Python 3.6 时代的原始代码，版本号经过相互兼容性固定）
-# 说明：TimedJSONWebSignatureSerializer 在 itsdangerous>=2.1 中已移除；
-#       MigrateCommand 在 Flask-Migrate>=3.0 中已移除，故固定在旧版本。
-Flask==1.1.4
-Werkzeug==1.0.1
-Jinja2==2.11.3
-MarkupSafe==1.1.1
-itsdangerous==1.1.0
-click==7.1.2
+# Python 3.13 + Flask 3 技术栈（2026-11 迁移固定版本）
+Flask==3.1.3
+Werkzeug==3.1.9
+Jinja2==3.1.6
+MarkupSafe==3.0.4
+itsdangerous==2.2.0
+click==8.5.1
+blinker==1.9.0
 
-Flask-Bootstrap==3.3.7.1
-Flask-Mail==0.9.1
-Flask-Moment==0.11.0
-Flask-SQLAlchemy==2.5.1
-SQLAlchemy==1.4.46
-Flask-Login==0.5.0
-Flask-PageDown==0.2.2
-Flask-Script==2.0.6
-Flask-Migrate==2.7.0
+# 扩展
+Bootstrap-Flask==2.6.0          # Bootstrap 5 前端
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.1.8
+Flask-Login==0.6.3
+Flask-WTF==1.3.0
+WTForms==3.3.2
+email-validator==2.3.0          # WTForms Email() 校验依赖
+Flask-Migrate==4.1.0
+Flask-Mail==0.10.0
+Flask-Moment==1.0.6
+Flask-PageDown==0.4.0
+Flask-HTTPAuth==4.8.1           # REST API Basic 认证
 
-PyMySQL==1.0.2
-Markdown==3.3.7
-bleach==4.1.0
-coverage==5.5
+# 数据库 / 内容处理
+PyMySQL==1.2.4
+Markdown==3.11.3
+bleach==6.4.0
+
+# 工具
+python-dotenv==1.2.4            # 自动加载 .flaskenv / .env
+coverage==7.17.2
+Faker==40.54.0                  # 假数据生成（generate_fake）

@@ -1,11 +1,10 @@
 # -*- coding:UTF-8 -*-
-from datetime import datetime
 from flask import render_template, current_app, redirect, url_for, flash, request, abort, make_response
 from flask_login import login_required, current_user
 from . import main
 from .forms import PostForm, EditProfileForm, EditProfileAdminForm, CommentForm
 from .. import db
-from ..models import User, Permission, Role, Post, Comment
+from ..models import User, Permission, Role, Post, Comment, utcnow
 from ..decorators import admin_required, permission_required
 
 
@@ -32,10 +31,10 @@ def index():
     else:
         query = Post.query
     pagination = query.order_by(Post.timestamp.desc()).paginate(
-        page, per_page=current_app.config['FLASKY_POSTS_PER_PAGE'], error_out=False)
+        page=page, per_page=current_app.config['FLASKY_POSTS_PER_PAGE'], error_out=False)
     posts = pagination.items
     return render_template('index.html', form=form, posts=posts, pagination=pagination, user_agent=user_agent,
-                           current_time=datetime.utcnow(), show_followed=show_followed)
+                           current_time=utcnow(), show_followed=show_followed)
 
 
 @main.route('/admin')
@@ -57,7 +56,7 @@ def user(username):
     user = User.query.filter_by(username=username).first_or_404()
     page = request.args.get('page', 1, type=int)
     pagination = user.posts.order_by(Post.timestamp.desc()).paginate(
-        page, per_page=current_app.config['FLASKY_POSTS_PER_PAGE'], error_out=False)
+        page=page, per_page=current_app.config['FLASKY_POSTS_PER_PAGE'], error_out=False)
     posts = pagination.items
     return render_template('user.html', user=user, posts=posts, pagination=pagination)
 
@@ -85,14 +84,14 @@ def edit_profile():
 @admin_required
 def edit_profile_admin(id):
     # print(id)
-    user = User.query.get_or_404(id)
+    user = db.get_or_404(User, id)
     # print(user)
     form = EditProfileAdminForm(user=user)
     if form.validate_on_submit():
         user.email = form.email.data
         user.username = form.username.data
         user.confirmed = form.confirmed.data
-        user.role = Role.query.get(form.role.data)
+        user.role = db.session.get(Role, form.role.data)
         user.name = form.name.data
         user.location = form.location.data
         user.about_me = form.about_me.data
@@ -112,7 +111,7 @@ def edit_profile_admin(id):
 
 @main.route('/post/<int:id>', methods=['GET', 'POST'])
 def post(id):
-    post = Post.query.get_or_404(id)
+    post = db.get_or_404(Post, id)
     form = CommentForm()
     if form.validate_on_submit():
         comment = Comment(body=form.body.data, post=post, author=current_user._get_current_object())
@@ -122,9 +121,9 @@ def post(id):
         return redirect(url_for('.post', id=post.id, page=-1))
     page = request.args.get('page', 1, type=int)
     if page == -1:
-        page = (post.comments.count()-1)/current_app.config['FLASKY_COMMENTS_PER_PAGE']+1
+        page = (post.comments.count()-1)//current_app.config['FLASKY_COMMENTS_PER_PAGE']+1
     pagination = post.comments.order_by(Comment.timestamp.asc()).paginate(
-        page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'], error_out=False)
+        page=page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'], error_out=False)
     comments = pagination.items
     return render_template('post.html', posts=[post], form=form, comments=comments,
                            pagination=pagination)
@@ -133,7 +132,7 @@ def post(id):
 @main.route('/edit/<int:id>', methods=['GET', 'POST'])
 @login_required
 def edit(id):
-    post = Post.query.get_or_404(id)
+    post = db.get_or_404(Post, id)
     if current_user != post.author and not current_user.can(Permission.ADMIN):
         abort(403)
     form = PostForm()
@@ -188,7 +187,7 @@ def followers(username):
         flash('Invalid user')
         return redirect(url_for('.index'))
     page = request.args.get('page', 1, type=int)
-    pagination = user.followers.paginate(page,
+    pagination = user.followers.paginate(page=page,
                                          per_page=current_app.config['FLASKY_FOLLOWERS_PER_PAGE'],
                                          error_out=False)
     follows = [{'user': item.follower, 'timestamp': item.timestamp}for item in pagination.items]
@@ -203,7 +202,7 @@ def followed_by(username):
         flash('Invalid user.')
         return redirect(url_for('.index'))
     page = request.args.get('page', 1, type=int)
-    pagination = user.followed.paginate(page,
+    pagination = user.followed.paginate(page=page,
                                         per_page=current_app.config['FLASKY_FOLLOWERS_PER_PAGE'],
                                         error_out=False)
     follows = [{'user': item.followed, 'timestamp': item.timestamp}for item in pagination.items]
@@ -233,7 +232,7 @@ def show_followed():
 def moderate():
     page = request.args.get('page', 1, type=int)
     pagination = Comment.query.order_by(Comment.timestamp.desc()).paginate(
-        page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'], error_out=False)
+        page=page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'], error_out=False)
     comments = pagination.items
     return render_template('moderate.html', comments=comments, pagination=pagination, page=page)
 
@@ -242,7 +241,7 @@ def moderate():
 @login_required
 @permission_required(Permission.MODERATE)
 def moderate_enable(id):
-    comment = Comment.query.get_or_404(id)
+    comment = db.get_or_404(Comment, id)
     comment.disabled = False
     db.session.add(comment)
     db.session.commit()
@@ -253,7 +252,7 @@ def moderate_enable(id):
 @login_required
 @permission_required(Permission.MODERATE)
 def moderate_disable(id):
-    comment = Comment.query.get_or_404(id)
+    comment = db.get_or_404(Comment, id)
     comment.disabled = True
     db.session.add(comment)
     db.session.commit()

@@ -1,14 +1,40 @@
 # -*- coding:UTF-8 -*-
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from markdown import markdown
 from . import db, login_manager
 from app.exceptions import ValidationError
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import UserMixin, AnonymousUserMixin
 from flask import current_app, request, url_for
-from itsdangerous import TimedJSONWebSignatureSerializer as Serializer
+from itsdangerous import URLSafeTimedSerializer, BadSignature
+from sqlalchemy import event
 import hashlib
 import bleach
+
+
+def utcnow():
+    """当前 UTC 时间（无时区标记，与数据库 naive DateTime 列兼容）"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _serializer():
+    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+
+
+def _dumps(payload, expiration):
+    """生成带有效期的签名令牌"""
+    return _serializer().dumps({**payload, 'expiration': expiration})
+
+
+def _loads(token, key):
+    """校验令牌签名与有效期，成功返回载荷字典，失败返回 None"""
+    try:
+        data, timestamp = _serializer().loads(token, return_timestamp=True)
+    except BadSignature:
+        return None
+    if datetime.now(timezone.utc) - timestamp > timedelta(seconds=data.get('expiration', 3600)):
+        return None
+    return data if data.get(key) is not None else None
 
 
 class Permission:
@@ -23,7 +49,7 @@ class Follow(db.Model):
     __tablename__ = 'follows'
     follower_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
     followed_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=utcnow)
 
 
 class Role(db.Model):
@@ -84,7 +110,7 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(64), unique=True, index=True)
     username = db.Column(db.String(64), unique=True, index=True)
-    password_hash = db.Column(db.String(168))
+    password_hash = db.Column(db.String(256))
     avatar_hash = db.Column(db.String(32))
     role_id = db.Column(db.Integer, db.ForeignKey('roles.id'))
     confirmed = db.Column(db.Boolean, default=False)
@@ -93,8 +119,8 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(64))
     location = db.Column(db.String(64))
     about_me = db.Column(db.Text())
-    member_since = db.Column(db.DateTime(), default=datetime.utcnow)
-    last_seen = db.Column(db.DateTime(), default=datetime.utcnow)
+    member_since = db.Column(db.DateTime(), default=utcnow)
+    last_seen = db.Column(db.DateTime(), default=utcnow)
 
     posts = db.relationship('Post', backref='author', lazy='dynamic')
 
@@ -119,8 +145,8 @@ class User(UserMixin, db.Model):
     def __init__(self, **kwargs):
         super(User, self).__init__(**kwargs)
         if self.role is None:
-            if self.email == current_app.config['FLASKY_ADMIN']:
-                self.role = Role.query.filter_by(permissions='Administrator').first()
+            if self.email is not None and self.email == current_app.config['FLASKY_ADMIN']:
+                self.role = Role.query.filter_by(name='Administrator').first()
             if self.role is None:
                 self.role = Role.query.filter_by(default=True).first()
         if self.email is not None and self.avatar_hash is None:
@@ -131,18 +157,19 @@ class User(UserMixin, db.Model):
     def generate_fake(count=100):
         from sqlalchemy.exc import IntegrityError
         from random import seed
-        import forgery_py
+        from faker import Faker
+        fake = Faker()
 
         seed()
         for i in range(count):
-            u = User(email=forgery_py.internet.email_address(),
-                     username=forgery_py.internet.user_name(True),
-                     password=forgery_py.lorem_ipsum.word(),
+            u = User(email=fake.email(),
+                     username=fake.user_name(),
+                     password=fake.word(),
                      confirmed=True,
-                     name=forgery_py.name.full_name(),
-                     location=forgery_py.address.city(),
-                     about_me=forgery_py.lorem_ipsum.sentence(),
-                     member_since=forgery_py.date.date(True))
+                     name=fake.name(),
+                     location=fake.city(),
+                     about_me=fake.sentence(),
+                     member_since=fake.date_time_this_decade().replace(tzinfo=None))
             db.session.add(u)
             try:
                 db.session.commit()
@@ -161,34 +188,25 @@ class User(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
     def generate_confirmation_token(self, expiration=3600):  # 生成一个令牌，有效期默认一个小时
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
-        return s.dumps({'confirm': self.id})
+        return _dumps({'confirm': self.id}, expiration)
 
-    def confirm(self, token):  # 检验令牌，同时还检查令牌中的id是否与存储在current_user中的已登录的用户是否匹配
-        s = Serializer(current_app.config['SECRET_KEY'])
-        try:
-            data = s.loads(token)
-            print(data)
-        except:
-            return False
-        if data.get('confirm') != self.id:
+    def confirm(self, token):  # 检验令牌，同时还检查令牌中的id是否与已登录用户匹配
+        data = _loads(token, 'confirm')
+        if data is None or data.get('confirm') != self.id:
             return False
         self.confirmed = True
         db.session.add(self)
         return True
 
     def generate_reset_token(self, expiration=3600):
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
-        return s.dumps({'reset': self.id}).decode('utf-8')
+        return _dumps({'reset': self.id}, expiration)
 
     @staticmethod
     def reset_password(token, new_password):
-        s = Serializer(current_app.config['SECRET_KEY'])
-        try:
-            data = s.loads(token.encode('utf-8'))
-        except:
+        data = _loads(token, 'reset')
+        if data is None:
             return False
-        user = User.query.get(data.get('reset'))
+        user = db.session.get(User, data.get('reset'))
         if user is None:
             return False
         user.password = new_password
@@ -196,16 +214,11 @@ class User(UserMixin, db.Model):
         return True
 
     def generate_email_change_token(self, new_email, expiration=3600):
-        s = Serializer(current_app.config['SECRET_KEY'], expiration)
-        return s.dumps({'change_email': self.id, 'new_email': new_email}).decode('utf-8')
+        return _dumps({'change_email': self.id, 'new_email': new_email}, expiration)
 
     def change_email(self, token):
-        s = Serializer[current_app['SECRET_KEY']]
-        try:
-            data = s.loads(token.encode('utf-8'))
-        except:
-            return False
-        if data.get('change_email') != self.id:
+        data = _loads(token, 'change_email')
+        if data is None or data.get('change_email') != self.id:
             return False
         new_email = data.get('new_email')
         if new_email is None:
@@ -224,8 +237,9 @@ class User(UserMixin, db.Model):
         return self.can(Permission.ADMIN)
 
     def ping(self):  # 刷新最后一次登录的时间
-        self.last_seen = datetime.utcnow()
+        self.last_seen = utcnow()
         db.session.add(self)
+        db.session.commit()
 
     def gravatar_hash(self):
         return hashlib.md5(self.email.lower().encode('utf-8')).hexdigest()
@@ -264,22 +278,19 @@ class User(UserMixin, db.Model):
     def followed_posts(self):
         return Post.query.join(Follow, Follow.followed_id == Post.author_id).filter(Follow.follower_id == self.id)
 
-    def generate_auth_token(self, expiration):
-        s = Serializer(current_app.config['SECRET_KEY'], expires_in=expiration)
-        return s.dumps({'id': self.id})
+    def generate_auth_token(self, expiration=3600):
+        return _dumps({'id': self.id}, expiration)
 
     @staticmethod
     def verify_auth_token(token):
-        s = Serializer(current_app.config['SECRET_KEY'])
-        try:
-            data = s.loads(token)
-        except:
+        data = _loads(token, 'id')
+        if data is None:
             return None
-        return User.query.get(data['id'])
+        return db.session.get(User, data['id'])
 
     def to_json(self):
         json_user = {
-            'url': url_for('api.get_post', id=self.id, _external=True),
+            'url': url_for('api.get_user', id=self.id, _external=True),
             'username': self.username,
             'member_since': self.member_since,
             'last_seen': self.last_seen,
@@ -306,7 +317,7 @@ login_manager.anonymous_user = AnonymousUser
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 class Post(db.Model):
@@ -314,7 +325,7 @@ class Post(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     body = db.Column(db.Text)
     body_html = db.Column(db.Text)
-    timestamp = db.Column(db.DateTime, index=True, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, index=True, default=utcnow)
     author_id = db.Column(db.Integer, db.ForeignKey('users.id'))
 
     comments = db.relationship('Comment', backref='post', lazy='dynamic')
@@ -329,14 +340,15 @@ class Post(db.Model):
     @staticmethod
     def generate_fake(count=100):
         from random import seed, randint
-        import forgery_py
+        from faker import Faker
+        fake = Faker()
 
         seed()
         user_count = User.query.count()
         for i in range(count):
             u = User.query.offset(randint(0, user_count-1)).first()
-            p = Post(body=forgery_py.lorem_ipsum.sentence(randint(1, 3)),
-                     timestamp=forgery_py.date.date(True),
+            p = Post(body=fake.sentence(nb_words=randint(3, 18)),
+                     timestamp=fake.date_time_this_year().replace(tzinfo=None),
                      author=u)
             db.session.add(p)
             db.session.commit()
@@ -361,7 +373,7 @@ class Post(db.Model):
         return Post(body=body)
 
 
-db.event.listen(Post.body, 'set', Post.on_changed_body)
+event.listen(Post.body, 'set', Post.on_changed_body)
 
 
 class Comment(db.Model):
@@ -369,7 +381,7 @@ class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     body = db.Column(db.Text)
     body_html = db.Column(db.Text)
-    timestamp = db.Column(db.DateTime, index=True, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, index=True, default=utcnow)
     disabled = db.Column(db.Boolean)
     author_id = db.Column(db.Integer, db.ForeignKey('users.id'))
     post_id = db.Column(db.Integer, db.ForeignKey('posts.id'))
@@ -399,4 +411,4 @@ class Comment(db.Model):
         return Comment(body=body)
 
 
-db.event.listen(Comment.body, 'set', Comment.on_changed_body)
+event.listen(Comment.body, 'set', Comment.on_changed_body)

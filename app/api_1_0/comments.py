@@ -10,7 +10,7 @@ from .decorators import permission_required
 def get_comments():
     page = request.args.get('page', 1, type=int)
     pagination = Comment.query.order_by(Comment.timestamp.desc()).paginate(
-        page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'],
+        page=page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'],
         error_out=False)
     comments = pagination.items
     prev = None
@@ -29,16 +29,16 @@ def get_comments():
 
 @api.route('/comments/<int:id>')  # 一篇评论
 def get_comment(id):
-    comment = Comment.query.get_or_404(id)
+    comment = db.get_or_404(Comment, id)
     return jsonify(comment.to_json())
 
 
 @api.route('/posts/<int:id>/comments/')
 def get_post_comments(id):
-    post = Post.query.get_or_404(id)
+    post = db.get_or_404(Post, id)
     page = request.args.get('page', 1, type=int)
     pagination = post.comments.order_by(Comment.timestamp.asc()).paginate(
-        page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'],
+        page=page, per_page=current_app.config['FLASKY_COMMENTS_PER_PAGE'],
         error_out=False)
     comments = pagination.items
     prev = None
@@ -58,7 +58,7 @@ def get_post_comments(id):
 @api.route('/posts/<int:id>/comments/', methods=['POST'])
 @permission_required(Permission.COMMENT)
 def new_post_comment(id):
-    post = Post.query.get_or_404(id)
+    post = db.get_or_404(Post, id)
     comment = Comment.from_json(request.json)
     comment.author = g.current_user
     comment.post = post

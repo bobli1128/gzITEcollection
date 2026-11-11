@@ -1,30 +1,43 @@
 # -*- coding:UTF-8 -*-
 import os
+import sys
+
+import click
 
 COV = None
-if os.environ.get('FLASKY_COVERAGE'):
+if os.environ.get('FLASK_COVERAGE'):
     import coverage
     COV = coverage.coverage(branch=True, include='app/*')
     COV.start()
 
 from app import create_app, db
 from app.models import User, Role, Post, Comment, Permission, Follow
-from flask_script import Manager, Shell
-from flask_migrate import Migrate, MigrateCommand
-
 
 app = create_app(os.getenv('FLASK_CONFIG') or 'default')
-manager = Manager(app)
-migrate = Migrate(app, db)
 
 
-@manager.command
-def test(coverage=False):
-    """Run the unit test"""
-    if coverage and not os.environ.get('FLASKY_COVERAGE'):
-        import sys
-        os.environ['FALSKY_COVERAGE'] = '1'
-        os.execvp(sys.executable, [sys.executable]+sys.argv)
+@app.shell_context_processor
+def make_shell_context():
+    return dict(app=app, db=db, User=User, Role=Role, Post=Post, Comment=Comment,
+                Permission=Permission, Follow=Follow)
+
+
+@app.cli.command()
+def test():
+    """Run the unit tests."""
+    import unittest
+    tests = unittest.TestLoader().discover('tests')
+    unittest.TextTestRunner(verbosity=2).run(tests)
+
+
+@app.cli.command()
+@click.option('--coverage/--no-coverage', default=False, help='Run tests under code coverage.')
+def coverage_test(coverage):
+    """Run the unit tests under code coverage."""
+    if coverage and not os.environ.get('FLASK_COVERAGE'):
+        import subprocess
+        os.environ['FLASK_COVERAGE'] = '1'
+        sys.exit(subprocess.call(sys.argv))
     import unittest
     tests = unittest.TestLoader().discover('tests')
     unittest.TextTestRunner(verbosity=2).run(tests)
@@ -36,17 +49,5 @@ def test(coverage=False):
         COV.erase()
 
 
-@app.shell_context_processor
-def make_shell_context():
-    return dict(app=app, db=db, User=User, Role=Role, Post=Post, Comment=Comment,
-                Permission=Permission, Follow=Follow)
-
-
-# print(make_shell_context())
-
-manager.add_command("shell", Shell(make_context=make_shell_context))
-manager.add_command('db', MigrateCommand)
-
-
 if __name__ == '__main__':
-    manager.run()
+    app.run()

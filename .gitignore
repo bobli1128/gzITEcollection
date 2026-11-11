@@ -28,9 +28,8 @@ instance/
 htmlcov/
 .pytest_cache/
 
-# Environment variables
+# Environment variables (.flaskenv is committed, .env holds secrets)
 .env
-.flaskenv
 
 # OS
 .DS_Store

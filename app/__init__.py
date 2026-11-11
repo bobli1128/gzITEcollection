@@ -1,6 +1,6 @@
 # -*- coding:UTF-8 -*-
 from flask import Flask
-from flask_bootstrap import Bootstrap
+from flask_bootstrap import Bootstrap5
 from flask_mail import Mail
 from flask_moment import Moment
 from flask_sqlalchemy import SQLAlchemy
@@ -8,7 +8,7 @@ from flask_login import LoginManager
 from flask_pagedown import PageDown
 from config import config
 
-bootstrap = Bootstrap()
+bootstrap = Bootstrap5()
 mail = Mail()
 moment = Moment()
 db = SQLAlchemy()
@@ -29,6 +29,9 @@ def create_app(config_name):
     db.init_app(app)
     login_manager.init_app(app)
     pagedown.init_app(app)
+
+    from flask_migrate import Migrate
+    Migrate(app, db)
     # 附加路由和自定义的错误页面
 
     from .main import main as main_blueprint

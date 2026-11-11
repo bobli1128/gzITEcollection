@@ -70,6 +70,7 @@ def confirm(token):
     if current_user.confirmed:
         return redirect(url_for('main.index'))
     if current_user.confirm(token):
+        db.session.commit()
         flash('You have confirmed your account. Thanks!')
     else:
         flash('The confirmation link is invalid or has expired.')
@@ -150,7 +151,7 @@ def change_email_request():
     return render_template('auth/change_email.html', form=form)
 
 
-@auth.route('change_email/<token>')
+@auth.route('/change_email/<token>')
 @login_required
 def change_email(token):
     if current_user.change_email(token):
