@@ -1,0 +1,24 @@
+# 遗留版本依赖（针对 Python 3.6 时代的原始代码，版本号经过相互兼容性固定）
+# 说明：TimedJSONWebSignatureSerializer 在 itsdangerous>=2.1 中已移除；
+#       MigrateCommand 在 Flask-Migrate>=3.0 中已移除，故固定在旧版本。
+Flask==1.1.4
+Werkzeug==1.0.1
+Jinja2==2.11.3
+MarkupSafe==1.1.1
+itsdangerous==1.1.0
+click==7.1.2
+
+Flask-Bootstrap==3.3.7.1
+Flask-Mail==0.9.1
+Flask-Moment==0.11.0
+Flask-SQLAlchemy==2.5.1
+SQLAlchemy==1.4.46
+Flask-Login==0.5.0
+Flask-PageDown==0.2.2
+Flask-Script==2.0.6
+Flask-Migrate==2.7.0
+
+PyMySQL==1.0.2
+Markdown==3.3.7
+bleach==4.1.0
+coverage==5.5
